@@ -1,0 +1,95 @@
+export const dynamic = "force-dynamic";
+
+import { getRoadmapForUser, generateRoadmap } from "@/actions/career";
+import { RoadmapTimeline } from "@/components/ui/roadmap-timeline";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+
+export default async function RoadmapPage({ searchParams }) {
+  // Support ?careerId=xxx from the "View Roadmap" button on career cards
+  const careerId = searchParams?.careerId || null;
+
+  let roadmap = await getRoadmapForUser(careerId);
+
+  if (!roadmap) {
+    roadmap = await generateRoadmap(careerId);
+  }
+
+  if (!roadmap) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-6xl font-bold gradient-title">
+          Learning Roadmap
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          We could not generate a roadmap yet. Ensure your profile has skills
+          configured and that careers and skills datasets are set up by an
+          admin.
+        </p>
+      </div>
+    );
+  }
+
+  const steps = Array.isArray(roadmap.steps) ? roadmap.steps : [];
+  const career = roadmap.career;
+  const matchedSkills = Array.isArray(roadmap.matchedSkills)
+    ? roadmap.matchedSkills
+    : [];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row gap-2 items-center justify-between mb-2">
+        <div>
+          <h1 className="text-6xl font-bold gradient-title">
+            Learning Roadmap
+          </h1>
+          {career && (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Target career:{" "}
+              <span className="font-semibold">{career.title}</span>
+            </p>
+          )}
+        </div>
+      </div>
+
+      {steps.length === 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">
+              🎉 You&apos;re already on track!
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Great news — you already have all the required skills for{" "}
+              <span className="font-semibold">{career?.title}</span>. There are
+              no skill gaps to fill for this career path.
+            </p>
+            {matchedSkills.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Skills you already have
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {matchedSkills.map((skill) => (
+                    <Badge key={skill} variant="secondary">
+                      {skill}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Want to explore other careers?{" "}
+              <a href="/careers" className="underline underline-offset-2">
+                View all career recommendations →
+              </a>
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <RoadmapTimeline steps={steps} />
+      )}
+    </div>
+  );
+}

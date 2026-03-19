@@ -1,0 +1,43 @@
+import { getSkillGap } from "@/actions/career";
+import { SkillGapCard } from "@/components/ui/skill-gap-card";
+
+export default async function SkillGapPage() {
+  const result = await getSkillGap(null);
+
+  if (!result.career) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-6xl font-bold gradient-title">
+          Skill Gap Analysis
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          We could not identify a target career yet. Make sure you have skills
+          set in your profile and that careers have been configured by an
+          admin.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row gap-2 items-center justify-between mb-2">
+        <div>
+          <h1 className="text-6xl font-bold gradient-title">
+            Skill Gap Analysis
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Target career: <span className="font-semibold">{result.career.title}</span>
+          </p>
+        </div>
+      </div>
+
+      <SkillGapCard
+        requiredSkills={result.requiredSkills}
+        matchedSkills={result.matchedSkills}
+        missingSkills={result.missingSkills}
+      />
+    </div>
+  );
+}
+
