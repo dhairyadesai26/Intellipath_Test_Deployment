@@ -1,9 +1,19 @@
 import { serve } from "inngest/next";
 
 import { inngest } from "@/lib/inngest/client";
-import { generateIndustryInsights } from "@/lib/inngest/function";
+import {
+  generateIndustryInsights,
+  scoreCareers,
+  generateRoadmapBackground,
+  generateCareerDataForUser,
+} from "@/lib/inngest/function";
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
-  functions: [generateIndustryInsights],
+  functions: [
+    generateIndustryInsights,
+    scoreCareers,
+    generateRoadmapBackground,
+    generateCareerDataForUser,
+  ],
 });
