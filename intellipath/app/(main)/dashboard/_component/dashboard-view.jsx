@@ -16,6 +16,7 @@ import {
   TrendingUp,
   TrendingDown,
   Brain,
+  PenSquare,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import {
@@ -27,6 +28,8 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 
 const DashboardView = ({ insights }) => {
   // Transform salary data for the chart
@@ -77,6 +80,12 @@ const DashboardView = ({ insights }) => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <Badge variant="outline">Last updated: {lastUpdatedDate}</Badge>
+        <Link href="/onboarding">
+          <Button variant="outline" size="sm" className="flex items-center gap-2">
+            <PenSquare className="h-4 w-4" />
+            Edit Profile
+          </Button>
+        </Link>
       </div>
 
       {/* Market Overview Cards */}
