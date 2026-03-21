@@ -66,7 +66,17 @@ export async function generateCareerDataDirect(userId) {
     const userSkills = normalizeSkills(user.skills);
     const { industry, experience = 0, bio = "" } = user;
 
-    // 2. AI: Generate 5 personalised careers
+    // Clear stale data IMMEDIATELY so the banner shows right away
+    // and pages don't display outdated career/roadmap info.
+    await db.prediction.deleteMany({ where: { userId } }).catch(() => { });
+    await db.roadmap.deleteMany({ where: { userId } }).catch(() => { });
+
+    // Revalidate now so pages instantly see empty state → show banner
+    revalidatePath("/careers");
+    revalidatePath("/skill-gap");
+    revalidatePath("/internships");
+    revalidatePath("/roadmap");
+
     const careerData = await callGeminiJSON(`
 You are an expert AI career advisor. Generate exactly 5 realistic and relevant career paths for this user profile.
 
@@ -148,7 +158,7 @@ Return ONLY valid JSON (no markdown, no extra text):
 }
 
 Rules:
-- Include at least 1 remote internship
+- Include at least 5 remote internship
 - Companies should be plausible startups or firms in ${industry}
 - Titles should reflect entry-level positions
 `.trim());
@@ -209,17 +219,13 @@ Rules:
 - Scores should be realistic and differentiated
 `.trim());
 
-    // Clear old predictions and roadmaps
-    await db.prediction.deleteMany({ where: { userId } }).catch(() => { });
-    await db.roadmap.deleteMany({ where: { userId } }).catch(() => { });
-
+    // Save predictions
     for (const p of predictionData?.predictions ?? []) {
       const career = upsertedCareers.find(
         (c) => c.title.toLowerCase() === p.careerTitle?.toLowerCase()
       );
       if (!career) continue;
       const score = Math.min(100, Math.max(0, p.matchScore ?? 0)) / 100;
-      await db.prediction.deleteMany({ where: { userId, careerId: career.id } }).catch(() => { });
       await db.prediction.create({
         data: { userId, careerId: career.id, matchScore: score },
       });
