@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -27,6 +28,8 @@ model User {
   assessments   Assessment[]
   resume        Resume?
   coverLetter   CoverLetter[]
+  predictions   Prediction[]
+  roadmaps      Roadmap[]
 }
 
 model Assessment {
@@ -97,3 +100,80 @@ model IndustryInsight {
 
   @@index([industry])
 }
+
+// ─── IntelliPath Career Guidance Models ───────────────────────────────────────
+
+model Skill {
+  id          String        @id @default(cuid())
+  name        String        @unique
+  category    String?
+  careerSkills CareerSkill[]
+}
+
+model Career {
+  id          String        @id @default(cuid())
+  title       String
+  slug        String        @unique
+  description String?
+  industry    String?
+  level       String?       // "Entry", "Mid", "Senior"
+  careerSkills CareerSkill[]
+  predictions  Prediction[]
+  roadmaps     Roadmap[]
+  internships  Internship[]
+
+  @@index([slug])
+}
+
+model CareerSkill {
+  id        String  @id @default(cuid())
+  career    Career  @relation(fields: [careerId], references: [id])
+  careerId  String
+  skill     Skill   @relation(fields: [skillId], references: [id])
+  skillId   String
+
+  @@unique([careerId, skillId])
+}
+
+model Prediction {
+  id         String   @id @default(cuid())
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  career     Career   @relation(fields: [careerId], references: [id])
+  careerId   String
+  matchScore Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, careerId])
+  @@index([userId])
+}
+
+model Roadmap {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  career    Career   @relation(fields: [careerId], references: [id])
+  careerId  String
+  steps     Json[]   // Array of { skill, steps: [{title, description, order}] }
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, careerId])
+  @@index([userId])
+}
+
+model Internship {
+  id          String   @id @default(cuid())
+  title       String
+  company     String
+  location    String?
+  applyUrl    String?
+  description String?
+  isRemote    Boolean  @default(false)
+  career      Career?  @relation(fields: [careerId], references: [id])
+  careerId    String?
+  createdAt   DateTime @default(now())
+
+  @@index([careerId])
+}

@@ -142,7 +142,7 @@ export const scoreCareers = inngest.createFunction(
       db.$transaction(
         scored.map((item) =>
           db.prediction.create({
-            data: { userId: user.id, careerId: item.career.id, matchScore: item.matchScore, userSkills },
+            data: { userId: user.id, careerId: item.career.id, matchScore: item.matchScore },
           })
         )
       )
@@ -392,7 +392,7 @@ Rules:
         const score = Math.min(100, Math.max(0, p.matchScore ?? 0)) / 100;
         await db.prediction.deleteMany({ where: { userId, careerId: career.id } }).catch(() => { });
         await db.prediction.create({
-          data: { userId, careerId: career.id, matchScore: score, userSkills },
+          data: { userId, careerId: career.id, matchScore: score },
         });
       }
     });
@@ -462,6 +462,7 @@ Rules:
     await step.run("Revalidate paths", async () => {
       revalidatePath("/dashboard");
       revalidatePath("/careers");
+      revalidatePath("/skill-gap");
       revalidatePath("/internships");
       revalidatePath("/roadmap");
       return "Paths revalidated";

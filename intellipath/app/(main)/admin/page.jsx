@@ -46,7 +46,7 @@ export default async function AdminPage() {
   const [careers, skills, internships] = await Promise.all([
     db.career.findMany({
       include: { careerSkills: { include: { skill: true } } },
-      orderBy: { createdAt: "desc" },
+      orderBy: { title: "asc" },
     }),
     db.skill.findMany({ orderBy: { name: "asc" } }),
     db.internship.findMany({

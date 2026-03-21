@@ -307,3 +307,26 @@ export async function recommendInternships(careerId) {
   return internships;
 }
 
+/**
+ * Returns whether the user has completed their profile but AI data
+ * (predictions) hasn't been generated yet — i.e., Inngest is still running.
+ */
+export async function getAIGenerationStatus() {
+  const { userId } = await auth();
+  if (!userId) return { profileReady: false, dataReady: false };
+
+  const user = await db.user.findUnique({
+    where: { clerkUserId: userId },
+    select: { id: true, industry: true, skills: true },
+  });
+
+  if (!user) return { profileReady: false, dataReady: false };
+
+  const profileReady = !!(user.industry && user.skills?.length > 0);
+  if (!profileReady) return { profileReady: false, dataReady: false };
+
+  const predictionCount = await db.prediction.count({ where: { userId: user.id } });
+  return { profileReady: true, dataReady: predictionCount > 0 };
+}
+
+

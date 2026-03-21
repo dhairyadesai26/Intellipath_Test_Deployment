@@ -1,0 +1,8 @@
+{
+  "functions": [
+    {
+      "src": "app/api/inngest/route.js",
+      "maxDuration": 300
+    }
+  ]
+}
