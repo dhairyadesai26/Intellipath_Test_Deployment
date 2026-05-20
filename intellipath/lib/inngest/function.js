@@ -57,8 +57,11 @@ async function callGeminiJSON(prompt) {
 // Existing: Weekly industry insights refresh
 // ─────────────────────────────────────────────────────────────────────────────
 export const generateIndustryInsights = inngest.createFunction(
-  { id: "generate-industry-insights", name: "Generate Industry Insights" },
-  { cron: "0 0 * * 0" },
+  {
+    id: "generate-industry-insights",
+    name: "Generate Industry Insights",
+    triggers: { cron: "0 0 * * 0" },
+  },
   async ({ event, step }) => {
     const industries = await step.run("Fetch industries", async () => {
       return await db.industryInsight.findMany({ select: { industry: true } });
@@ -107,8 +110,11 @@ export const generateIndustryInsights = inngest.createFunction(
 // Existing: Rule-based career scoring (kept for backward compat)
 // ─────────────────────────────────────────────────────────────────────────────
 export const scoreCareers = inngest.createFunction(
-  { id: "score-careers", name: "Score Careers for User" },
-  { event: "career/score" },
+  {
+    id: "score-careers",
+    name: "Score Careers for User",
+    triggers: { event: "career/score" },
+  },
   async ({ event, step }) => {
     const { userId } = event.data;
     const user = await step.run("Fetch user", () =>
@@ -154,8 +160,11 @@ export const scoreCareers = inngest.createFunction(
 // Existing: Rule-based roadmap background job (kept for backward compat)
 // ─────────────────────────────────────────────────────────────────────────────
 export const generateRoadmapBackground = inngest.createFunction(
-  { id: "generate-roadmap", name: "Generate Learning Roadmap" },
-  { event: "roadmap/generate" },
+  {
+    id: "generate-roadmap",
+    name: "Generate Learning Roadmap",
+    triggers: { event: "roadmap/generate" },
+  },
   async ({ event, step }) => {
     const { userId, careerId } = event.data;
     const user = await step.run("Fetch user", () =>
@@ -202,8 +211,12 @@ export const generateRoadmapBackground = inngest.createFunction(
 //  7. AI  → Generate personalised roadmap → save Roadmap
 // ─────────────────────────────────────────────────────────────────────────────
 export const generateCareerDataForUser = inngest.createFunction(
-  { id: "generate-career-data", name: "IntelliPath: Generate AI Career Data", retries: 2 },
-  { event: "intellipath/career.generate" },
+  {
+    id: "generate-career-data",
+    name: "IntelliPath: Generate AI Career Data",
+    retries: 2,
+    triggers: { event: "intellipath/career.generate" },
+  },
   async ({ event, step }) => {
     const { userId } = event.data;
 
