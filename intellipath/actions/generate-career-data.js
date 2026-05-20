@@ -11,163 +11,114 @@ function normalizeSkills(skills) {
   return (skills || []).map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
 
-function generateLearningStepsForSkill(skillName) {
-  const base = skillName.trim();
-  return [
-    {
-      title: `Understand ${base} fundamentals`,
-      description: `Spend 3–5 hours going through beginner-friendly tutorials and official documentation for ${base}. Focus on core concepts and terminology.`,
-      order: 1,
-    },
-    {
-      title: `Build a small project with ${base}`,
-      description: `Implement a small, practical project where you apply ${base} in a real-world context. Aim to cover at least 2–3 core use cases.`,
-      order: 2,
-    },
-    {
-      title: `Deep dive and advanced practice`,
-      description: `Explore advanced topics in ${base}, complete practice challenges, and refactor your project to follow best practices.`,
-      order: 3,
-    },
-  ];
-}
-
 async function callGeminiJSON(prompt) {
-  try {
-    const result = await model.generateContent(prompt);
-    let text = result.response.text();
-    const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (match) {
-      text = match[1].trim();
-    } else {
-      text = text.replace(/```(?:json)?/g, "").replace(/```/g, "").trim();
-    }
-    return JSON.parse(text);
-  } catch (error) {
-    console.error("Gemini JSON parse error:", error);
-    throw error;
+  const result = await model.generateContent(prompt);
+  let text = result.response.text();
+  // Strip markdown code fences if present
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (match) {
+    text = match[1].trim();
+  } else {
+    text = text.replace(/```(?:json)?/g, "").replace(/```/g, "").trim();
   }
+  return JSON.parse(text);
 }
 
 /**
  * Core AI career data generation pipeline.
- * Called directly from updateUser — no Inngest needed in local dev.
- * Generates: Careers, CareerSkills, Internships, Predictions, Roadmap.
+ * Called directly from updateUser in local dev (awaited).
+ * In production, called by the Inngest function instead.
  */
 export async function generateCareerDataDirect(userId) {
+  console.log("🚀 generateCareerDataDirect START for userId:", userId);
+
+  // ── Step 1: Fetch user ─────────────────────────────────────────────────────
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { id: true, industry: true, skills: true, experience: true, bio: true },
+  });
+
+  if (!user) { console.log("❌ user not found"); return; }
+  if (!user.industry) { console.log("❌ user has no industry set"); return; }
+
+  const userSkills = normalizeSkills(user.skills);
+  const industry = user.industry;
+  const experience = user.experience ?? 0;
+  const bio = user.bio ?? "";
+
+  console.log("👤 User profile:", { industry, experience, skills: userSkills });
+
+  // ── Step 2: Clear old data immediately (so banner shows) ───────────────────
+  await db.prediction.deleteMany({ where: { userId } });
+  await db.roadmap.deleteMany({ where: { userId } });
+  console.log("🗑️  Cleared old predictions and roadmaps");
+
+  // ── Step 3: Generate 5 career paths ───────────────────────────────────────
+  console.log("🤖 Calling Gemini for careers...");
+  let careerData;
   try {
-    // 1. Fetch user profile
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      select: { id: true, industry: true, skills: true, experience: true, bio: true },
+    careerData = await callGeminiJSON(`
+You are an AI career advisor. Generate exactly 5 relevant career paths for this user.
+
+Industry: ${industry}
+Skills: ${userSkills.join(", ") || "none"}
+Experience: ${experience} years
+
+Return ONLY this JSON, no markdown:
+{"careers":[{"title":"string","slug":"unique-kebab-case","description":"2 sentences","industry":"string","level":"Entry","requiredSkills":["skill1","skill2"]}]}
+
+Rules: requiredSkills must be 5-8 lowercase strings. level must be Entry, Mid, or Senior.
+    `.trim());
+  } catch (err) {
+    console.error("❌ Gemini career gen failed:", err.message);
+    return;
+  }
+
+  const aiCareers = careerData?.careers ?? [];
+  if (!aiCareers.length) { console.log("❌ Gemini returned 0 careers"); return; }
+  console.log("✅ Got", aiCareers.length, "careers from Gemini");
+
+  // ── Step 4: Upsert careers + skills + relationships ────────────────────────
+  const upsertedCareers = [];
+  for (const c of aiCareers) {
+    const slug = (c.slug || c.title.toLowerCase().replace(/\s+/g, "-")).replace(/[^a-z0-9-]/g, "");
+    const career = await db.career.upsert({
+      where: { slug },
+      update: { title: c.title, description: c.description, industry: c.industry || industry, level: c.level || "Mid" },
+      create: { title: c.title, slug, description: c.description, industry: c.industry || industry, level: c.level || "Mid" },
     });
-    if (!user?.industry) return;
 
-    const userSkills = normalizeSkills(user.skills);
-    const { industry, experience = 0, bio = "" } = user;
-
-    // Clear stale data IMMEDIATELY so the banner shows right away
-    // and pages don't display outdated career/roadmap info.
-    await db.prediction.deleteMany({ where: { userId } }).catch(() => { });
-    await db.roadmap.deleteMany({ where: { userId } }).catch(() => { });
-
-    // Revalidate now so pages instantly see empty state → show banner
-    revalidatePath("/careers");
-    revalidatePath("/skill-gap");
-    revalidatePath("/internships");
-    revalidatePath("/roadmap");
-
-    const careerData = await callGeminiJSON(`
-You are an expert AI career advisor. Generate exactly 5 realistic and relevant career paths for this user profile.
-
-USER PROFILE:
-- Industry: ${industry}
-- Current Skills: ${userSkills.length ? userSkills.join(", ") : "none listed"}
-- Experience: ${experience} years
-- Bio: ${bio || "not provided"}
-
-Return ONLY valid JSON (no markdown, no extra text):
-{
-  "careers": [
-    {
-      "title": "string",
-      "slug": "string (kebab-case, unique globally, e.g. full-stack-developer)",
-      "description": "string (2 clear sentences describing the role)",
-      "industry": "string",
-      "level": "Entry" or "Mid" or "Senior",
-      "requiredSkills": ["lowercase skill 1", "lowercase skill 2"]
-    }
-  ]
-}
-
-Rules:
-- requiredSkills: 5–8 lowercase skill strings per career
-- Vary experience levels (Entry/Mid/Senior) across the 5 careers
-- All careers must be directly relevant to the user's industry and background
-`.trim());
-
-    const aiCareers = careerData?.careers ?? [];
-    if (!aiCareers.length) return;
-
-    // 3. Upsert Careers + Skills + CareerSkill mappings
-    const upsertedCareers = [];
-    for (const c of aiCareers) {
-      const career = await db.career.upsert({
-        where: { slug: c.slug },
-        update: { title: c.title, description: c.description, industry: c.industry, level: c.level },
-        create: { title: c.title, slug: c.slug, description: c.description, industry: c.industry, level: c.level },
+    const skillNames = [];
+    for (const raw of c.requiredSkills ?? []) {
+      const name = raw.trim().toLowerCase();
+      if (!name) continue;
+      const skill = await db.skill.upsert({
+        where: { name },
+        update: {},
+        create: { name, category: industry },
       });
-
-      const skillNames = [];
-      for (const raw of c.requiredSkills ?? []) {
-        const name = raw.trim().toLowerCase();
-        if (!name) continue;
-        const skill = await db.skill.upsert({
-          where: { name },
-          update: {},
-          create: { name, category: c.industry },
-        });
-        await db.careerSkill
-          .create({ data: { careerId: career.id, skillId: skill.id } })
-          .catch(() => { });
-        skillNames.push(name);
-      }
-
-      upsertedCareers.push({ id: career.id, title: career.title, requiredSkills: skillNames });
+      await db.careerSkill.create({ data: { careerId: career.id, skillId: skill.id } }).catch(() => { });
+      skillNames.push(name);
     }
+    upsertedCareers.push({ id: career.id, title: career.title, requiredSkills: skillNames });
+  }
+  console.log("✅ Upserted", upsertedCareers.length, "careers to DB");
 
-    const topCareer = upsertedCareers[0];
-    if (!topCareer) return;
+  const topCareer = upsertedCareers[0];
+  if (!topCareer) return;
 
-    // 4. AI: Generate 3 internship listings
+  // ── Step 5: Generate internships ───────────────────────────────────────────
+  console.log("🤖 Calling Gemini for internships...");
+  try {
     const internshipData = await callGeminiJSON(`
-You are a job board assistant. Generate exactly 3 realistic internship listings for someone targeting the role of "${topCareer.title}" in the "${industry}" industry.
+You are a job board assistant. Generate exactly 3 internship listings for a "${topCareer.title}" role in ${industry}.
 
-Return ONLY valid JSON (no markdown, no extra text):
-{
-  "internships": [
-    {
-      "title": "string",
-      "company": "string (realistic company name, not a real company)",
-      "location": "string (City, State or 'Remote')",
-      "description": "string (2–3 sentences about responsibilities)",
-      "applyUrl": "https://example.com/apply/unique-slug",
-      "isRemote": true or false
-    }
-  ]
-}
+Return ONLY this JSON, no markdown:
+{"internships":[{"title":"string","company":"string","location":"string","description":"2 sentences","applyUrl":"https://example.com/apply/slug","isRemote":false}]}
+    `.trim());
 
-Rules:
-- Include at least 5 remote internship
-- Companies should be plausible startups or firms in ${industry}
-- Titles should reflect entry-level positions
-`.trim());
-
-    // 5. Upsert Internships
     for (const i of internshipData?.internships ?? []) {
-      const exists = await db.internship.findFirst({
-        where: { title: i.title, company: i.company },
-      });
+      const exists = await db.internship.findFirst({ where: { title: i.title, company: i.company } });
       if (exists) continue;
       await db.internship.create({
         data: {
@@ -176,62 +127,58 @@ Rules:
           location: i.location ?? "Remote",
           description: i.description,
           applyUrl: i.applyUrl ?? "https://example.com/apply",
-          isRemote: i.isRemote ?? false,
+          isRemote: !!i.isRemote,
           career: { connect: { id: topCareer.id } },
         },
       });
     }
+    console.log("✅ Internships saved");
+  } catch (err) {
+    console.error("⚠️ Internship gen failed (non-fatal):", err.message);
+  }
 
-    // 6. AI: Score & Predict Careers
+  // ── Step 6: Score & save career predictions ────────────────────────────────
+  console.log("🤖 Calling Gemini for career scoring...");
+  try {
     const careerList = upsertedCareers
-      .map((c) => `- ${c.title} (requires: ${c.requiredSkills.join(", ")})`)
+      .map((c) => `- ${c.title} (needs: ${c.requiredSkills.join(", ")})`)
       .join("\n");
 
     const predictionData = await callGeminiJSON(`
-You are an expert career counsellor. Evaluate how well this user fits each of the career options below.
+You are a career counsellor. Score how well this user fits each career (0-100).
 
-USER PROFILE:
-- Industry: ${industry}
-- Current Skills: ${userSkills.length ? userSkills.join(", ") : "none"}
-- Experience: ${experience} years
-- Bio: ${bio || "not provided"}
+User: ${industry}, ${experience} yrs exp, skills: ${userSkills.join(", ") || "none"}
 
-CANDIDATE CAREERS:
+Careers:
 ${careerList}
 
-Score each career 0–100 based on profile fit.
-Return ONLY valid JSON (no markdown, no extra text):
-{
-  "predictions": [
-    {
-      "careerTitle": "string (match exactly one title above)",
-      "matchScore": number (0–100),
-      "reasoning": "string (1–2 sentences explaining the score)",
-      "matchedSkills": ["lowercase skill"],
-      "missingSkills": ["lowercase skill"]
-    }
-  ]
-}
+Return ONLY this JSON, no markdown:
+{"predictions":[{"careerTitle":"exact title from above","matchScore":75}]}
 
-Rules:
-- Include ALL ${upsertedCareers.length} careers
-- Factor in experience and bio, not just skill keywords
-- Scores should be realistic and differentiated
-`.trim());
+Include ALL ${upsertedCareers.length} careers with realistic, varied scores.
+    `.trim());
 
-    // Save predictions
     for (const p of predictionData?.predictions ?? []) {
       const career = upsertedCareers.find(
-        (c) => c.title.toLowerCase() === p.careerTitle?.toLowerCase()
+        (c) => c.title.toLowerCase() === (p.careerTitle ?? "").toLowerCase()
       );
       if (!career) continue;
-      const score = Math.min(100, Math.max(0, p.matchScore ?? 0)) / 100;
-      await db.prediction.create({
-        data: { userId, careerId: career.id, matchScore: score },
-      });
+      const score = Math.min(1, Math.max(0, (p.matchScore ?? 50) / 100));
+      await db.prediction.create({ data: { userId, careerId: career.id, matchScore: score } });
     }
+    console.log("✅ Predictions saved");
+  } catch (err) {
+    console.error("❌ Prediction scoring failed:", err.message);
+    // Save default predictions so banner clears even if scoring fails
+    for (const career of upsertedCareers) {
+      await db.prediction.create({ data: { userId, careerId: career.id, matchScore: 0.5 } }).catch(() => { });
+    }
+    console.log("✅ Fallback predictions saved");
+  }
 
-    // 7. AI: Generate Personalised Roadmap
+  // ── Step 7: Generate learning roadmap ─────────────────────────────────────
+  console.log("🤖 Calling Gemini for roadmap...");
+  try {
     const missingSkills = topCareer.requiredSkills.filter((s) => !userSkills.includes(s));
 
     if (!missingSkills.length) {
@@ -240,60 +187,41 @@ Rules:
         update: { steps: [] },
         create: { userId, careerId: topCareer.id, steps: [] },
       });
+      console.log("✅ Roadmap saved (no missing skills)");
     } else {
       const roadmapData = await callGeminiJSON(`
-You are a personalized learning coach. Create a detailed, actionable learning roadmap for someone targeting the role of "${topCareer.title}".
+Create a learning roadmap for "${topCareer.title}". Skills to learn: ${missingSkills.slice(0, 5).join(", ")}.
 
-USER PROFILE:
-- Industry: ${industry}
-- Experience: ${experience} years
-- Bio: ${bio || "not provided"}
-- Skills they ALREADY have: ${userSkills.join(", ") || "none"}
-- Skills they NEED to learn: ${missingSkills.join(", ")}
+Return ONLY this JSON, no markdown:
+{"roadmap":[{"skill":"skill name","steps":[{"title":"step title","description":"2 sentences","estimatedHours":5,"order":1}]}]}
 
-Generate a step-by-step learning plan for EACH missing skill.
-Return ONLY valid JSON (no markdown, no extra text):
-{
-  "roadmap": [
-    {
-      "skill": "lowercase skill name",
-      "steps": [
-        {
-          "title": "string (clear action-oriented title)",
-          "description": "string (specific, actionable, 2–3 sentences)",
-          "resources": ["Resource Name – URL or platform"],
-          "estimatedHours": number,
-          "order": number
-        }
-      ]
-    }
-  ]
-}
-
-Rules:
-- Each skill gets 3–4 learning steps ordered from beginner to advanced
-- Resources must be real, well-known platforms (MDN, freeCodeCamp, Coursera, official docs, etc.)
-- estimatedHours per step: 2–20 hours (realistic)
-- Tailor difficulty to the user's experience level
-`.trim());
+Each skill: 3 steps, beginner to advanced.
+      `.trim());
 
       await db.roadmap.upsert({
         where: { userId_careerId: { userId, careerId: topCareer.id } },
         update: { steps: roadmapData?.roadmap ?? [] },
         create: { userId, careerId: topCareer.id, steps: roadmapData?.roadmap ?? [] },
       });
+      console.log("✅ Roadmap saved");
     }
+  } catch (err) {
+    console.error("⚠️ Roadmap gen failed (non-fatal):", err.message);
+    await db.roadmap.upsert({
+      where: { userId_careerId: { userId, careerId: topCareer.id } },
+      update: { steps: [] },
+      create: { userId, careerId: topCareer.id, steps: [] },
+    }).catch(() => { });
+  }
 
-    // Revalidate pages
+  // ── Step 8: Revalidate pages ───────────────────────────────────────────────
+  try {
     revalidatePath("/dashboard");
     revalidatePath("/careers");
     revalidatePath("/skill-gap");
     revalidatePath("/internships");
     revalidatePath("/roadmap");
+  } catch (_) { }
 
-    console.log("✅ AI career data generated for user:", userId);
-  } catch (error) {
-    console.error("❌ generateCareerDataDirect failed:", error.message);
-    // Non-fatal — profile was still saved successfully
-  }
+  console.log("🎉 generateCareerDataDirect COMPLETE for userId:", userId);
 }

@@ -94,7 +94,8 @@ export async function getSkillGap(careerId, inputSkills) {
   );
 
   if (!careerId) {
-    // If career not specified, pick the top predicted career
+
+    
     const prediction = await predictCareers(userSkills);
     const topCareer = prediction.careers[0];
     if (!topCareer) {

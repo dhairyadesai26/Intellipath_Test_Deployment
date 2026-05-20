@@ -51,9 +51,9 @@ export async function updateUser(data) {
     const skillsArray =
       typeof data.skills === "string"
         ? data.skills
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
         : data.skills ?? [];
 
     // Now update the user
